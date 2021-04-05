@@ -64,3 +64,41 @@ export function formatHsLStr(H) {
 export function enhanceHexBy(hex, intensity) {
     return formatHsLStr(intensifyHSLBy(hexToHSL(hex), intensity));
 }
+
+export function interpretDeltaE(outcome) {
+    if (outcome <= 1.0) {
+        return "diff not perceptible by human eyes.";
+    }
+    else if (outcome > 1 && outcome < 2) {
+        return "diff perceptible through close observation.";
+    }
+    else if (outcome >= 2 && outcome <= 10) {
+        return "diff perceptible at a glance";
+    }
+    else if (outcome >= 11 && outcome <= 49) {
+        return "colors are more similar than opposite";
+    }
+    else if (outcome === 100) {
+        return "colors are exact opposite";
+    } else {
+        return "colors are different";
+    }
+}
+
+export function hasAlphaChannel(color) {
+    return ["rgba, hsla"].includes(color.toLowerCase());
+}
+
+export function blendAlpha(src) {
+    const Source = {R: src.red/255, G: src.green/255, B: src.blue/255, A: src.alpha};
+    let Target = {};
+    const BGColor = {R: 1, G: 1, B:1}
+    Target.r = parseInt(255 * (((1 - Source.A) * BGColor.R) + (Source.A * Source.R)));
+    Target.g = parseInt(255 * (((1 - Source.A) * BGColor.G) + (Source.A * Source.G)));
+    Target.b = parseInt(255 * (((1 - Source.A) * BGColor.B) + (Source.A * Source.B)));
+    return Target;
+}
+
+export function isColorValid(color) {
+    return /^#[0-9A-F]{6}$/i.test(color);
+}

@@ -5,11 +5,10 @@ import {
     ListItem,
     ListItemIcon,
     ListItemSecondaryAction,
-    ListItemText, MenuItem,
+    ListItemText,
     Typography
 } from "@material-ui/core";
 import ColorPreviewCircle from "./ColorPreviewCircle";
-import {enhanceHexBy} from "../Utils";
 import React from "react";
 import ExpandLessIcon from '@material-ui/icons/ExpandLess';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
@@ -19,27 +18,30 @@ export default function RelativeColorVariableList(props) {
     return (
         <List component="nav" aria-label="relative variables">
             {props.relativeVariables.map((variable) =>
-                <ListItem button>
+                <ListItem>
                     <ListItemIcon>
-                        {/*{console.log()}*/}
                         <ColorPreviewCircle
-                            color={enhanceHexBy(getBaseColor(props.baseColors, variable.base)?.value, variable.intensity)}/>
+                            color={variable.value}/>
                     </ListItemIcon>
                     <ListItemText
                         primary={variable.name}
                         secondary={
-                            <Box display="flex" flexDirection="row">
-                                <Typography style={{"fontStyle": "italic"}}>
-                                    {getBaseColor(props.baseColors, variable.base).name}
-                                </Typography>
-                                &nbsp;
-                                {intensityIcon(variable.intensity)}
+                            <Box>
                                 <Typography>
-                                    &nbsp;{variable.intensity}%
+                                    <span style={{"fontStyle": "italic"}}>
+                                        {getBaseColor(props.baseColors, variable.base).name}
+                                    </span>
+                                    {intensityIcon(variable.intensity)} {variable.intensity}% ➡️ [{variable.value}]
                                 </Typography>
                             </Box>
                         }
                     />
+                    <ListItemText
+                        secondary={variable.mimicked}
+                    />
+                    <ListItemIcon>
+                        <ColorPreviewCircle dimen="25" color={variable.mimicked}/>
+                    </ListItemIcon>
                     <ListItemSecondaryAction onClick={(e) => props.onDeleteItemClicked(e, variable.name)}>
                         <IconButton edge="end" aria-label="delete">
                             <DeleteOutlineSharpIcon />

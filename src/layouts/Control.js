@@ -1,10 +1,5 @@
-import React, {useState} from "react";
-import {
-    Button,
-    Divider, List, ListItem, ListItemIcon, ListItemText,
-    Menu,
-    MenuItem
-} from "@material-ui/core";
+import React, {useEffect, useState} from "react";
+import {Button, Divider, Menu, MenuItem, Snackbar, Typography} from "@material-ui/core";
 import CodeSnippet from "./CodeSnippet";
 import ColorVariable from "../domain/ColorVariable";
 import ColorVariableList from "./ColorVariableList";
@@ -12,6 +7,16 @@ import AbsoluteColorForm from "./AbsoluteColorForm";
 import RelativeColorForm from "./RelativeColorForm";
 import RelativeVariable from "../domain/RelativeVariable";
 import RelativeColorVariableList from "./RelativeColorVariableList";
+import {parse} from 'svg-parser';
+import jp from 'jsonpath'
+import validateColor from "validate-color";
+import Color from 'color'
+import {blendAlpha, enhanceHexBy} from "../Utils";
+import DetectedColorList from "./DetectedColorList";
+import DeltaE from 'delta-e';
+import lab from "../domain/lab";
+import _ from 'lodash';
+import hastUtilToHtml from 'hast-util-to-html';
 
 export default function Control(props) {
 
@@ -20,28 +25,103 @@ export default function Control(props) {
     const [openRelativeColorForm, setOpenRelativeColorForm] = useState(false);
     const [absoluteColorName, setAbsoluteColorName] = useState("");
     const [absoluteHexColorValue, setAbsoluteHexColorValue] = useState("");
-    const [absoluteColorError, setAbsoluteColorError] = useState(null);
-    const [colorVariables, setColorVariables] = useState([])
-    const [relativeVariables, setRelativeVariables] = useState([])
-    const [relativeColorName, setRelativeColorName] = useState("")
-    const [relativeBaseColor, setRelativeBaseColor] = useState("")
-    const [relativeIntensity, setRelativeIntensity] = useState("")
+    const [absoluteFormError, setAbsoluteFormError] = useState(null);
+    const [colorVariables, setColorVariables] = useState([]);
+    const [relativeVariables, setRelativeVariables] = useState([]);
+    const [relativeColorName, setRelativeColorName] = useState("");
+    const [relativeBaseColor, setRelativeBaseColor] = useState("");
+    const [relativeIntensity, setRelativeIntensity] = useState(null);
     const [relativeFormError, setRelativeFormError] = useState(null);
+    const [originSvgValid, setOriginSvgValid] = useState(undefined);
+    const [suggestedColors, setSuggestedColors] = useState([]);
+    const [suggestedIntensity, setSuggestedIntensity] = useState(null);
+    const [toast, setToast] = useState({show: false, message: ""});
+    const [relativeMimicColor, setRelativeMimicColor] = useState("");
+    const [relativeFormState, setRelativeFormState] = useState(true);
+    const [originalCode, setOriginalCode] = useState("");
+    const [absoluteMimicColor, setAbsoluteMimicColor] = useState("");
+    let colorsCount = colorVariables.length + relativeVariables.length;
 
-    /**
-     *  Questions:
-     *  How do you store simple data? Local storage or within the context?
-     *  How do you read the content of svg? Is this necessary?
-     *  How do you deploy?
-     *  How do you add basic google authentication?
-     *  How do you link to firestore?
-     *
-     */
+    useEffect(() => {
+        computeColorSimilarity();
+    }, [computeColorSimilarity, relativeFormState]);
+
+    useEffect(() => {
+        generateTemplateAndModifiedSvg();
+        console.log(originSvgValid);
+        console.log(colorsCount);
+    }, [originSvgValid, colorsCount]) //TODO reach out to Richard, what does this warning mean.
 
     // eslint-disable-next-line no-extend-native
     String.prototype.isValidVar = function () {
         return (this.length === 0 || !this.trim() || this.indexOf(' ') >= 0) === false;
     };
+
+    function generateTemplateSvgCode(swapColors) {
+        const parsed = parse(originalCode);
+
+        let nodes = jp.apply(parsed, '$..fill', swapColors);
+        nodes.concat(jp.apply(parsed, '$..stroke', swapColors));
+        nodes.concat(jp.apply(parsed, '$..["stop-color"]', swapColors));
+        nodes.concat(jp.apply(parsed, '$..["flood-color"]', swapColors));
+        nodes.concat(jp.apply(parsed, '$..["lighting-color"]', swapColors));
+
+        const fillResult = changeValuesByPath(parsed, nodes, 'fill');
+        const strokeResult = changeValuesByPath(fillResult, nodes, 'stroke');
+        const stopColorResult = changeValuesByPath(strokeResult, nodes, 'stop-color');
+        const floodColorResult = changeValuesByPath(stopColorResult, nodes, 'flood-color');
+        const lightingColorResult = changeValuesByPath(floodColorResult, nodes, 'lighting-color');
+        return hastUtilToHtml(lightingColorResult);
+    }
+
+    function generateTemplateAndModifiedSvg() {
+        if (originSvgValid === true) {
+
+            const swapModifiedColorsFunc = function swapColors(value) {
+                const colorVar = _.find(colorVariables, (c) => c.mimicked === value);
+                const relVar = _.find(relativeVariables, (c) => c.mimicked === value);
+                if (colorVar) {
+                    return colorVar.value;
+                } else if (relVar) {
+                    return relVar.value;
+                } else {
+                    return value;
+                }
+            }
+            props.onModifiedSvgCode(generateTemplateSvgCode(swapModifiedColorsFunc));
+
+            const swapTemplatedColorsFunc = function swapColors(value) {
+                const colorVar = _.find(colorVariables, (c) => c.mimicked === value);
+                const relVar = _.find(relativeVariables, (c) => c.mimicked === value);
+                if (colorVar) {
+                    return "{{" + colorVar.name + "}}";
+                } else if (relVar) {
+                    return "{{" + relVar.name + "}}";
+                } else {
+                    return value;
+                }
+            }
+            props.onTemplatedSvgCode(generateTemplateSvgCode(swapTemplatedColorsFunc));
+        } else {
+            // clear modified ?
+        }
+    }
+
+    function changeValueByPath(object, path, value) {
+        if (Array.isArray(path) && path[0] === '$') {
+            const pathWithoutFirstElement = path.slice(1);
+            _.set(object, pathWithoutFirstElement, value);
+        }
+    }
+
+    function changeValuesByPath(object, nodes, lastPropertyName) {
+        nodes.forEach((node) => {
+            changeValueByPath(object, node.path.concat(lastPropertyName), node.value);
+        })
+
+        return object;
+    }
+
 
     function onAddColorClicked(e) {
         setAnchorElement(e.target);
@@ -59,69 +139,170 @@ export default function Control(props) {
         }
     }
 
-    function onAbsoluteColorFormFieldChanged(element, field) {
+    function onOriginalSvgTextChanged(text) {
+
+        setOriginalCode(text);
+        if (!text) {
+            setOriginSvgValid(undefined);
+            props.onOriginSvg(undefined);
+            return;
+        }
+
+        try {
+            const parsed = parse(text);
+            setOriginSvgValid(true)
+            props.onOriginSvg(text);
+
+            const jpColors = jp.query(parsed, '$..fill')
+            jpColors.push(...jp.query(parsed, '$..["stop-color"]'));
+            jpColors.push(...jp.query(parsed, '$..stroke'));
+            jpColors.push(...jp.query(parsed, '$..["flood-color"]'));
+            jpColors.push(...jp.query(parsed, '$..["lighting-color"]'));
+            console.log("jpColors");
+            console.log(jpColors);
+            const extractedColors = _.uniq(jpColors).filter(color => validateColor(color));
+            console.log(extractedColors);
+            const extractedColorsAsObjects = extractedColors.map((e) => {
+                    return {
+                        "hsl": (new Color(e)).hsl().string(),
+                        "actual": e
+                    };
+                }
+            )
+            setSuggestedColors(extractedColorsAsObjects);
+        } catch (e) {
+            props.onOriginSvg(undefined);
+            setOriginSvgValid(false)
+            setSuggestedColors([]);
+            console.log("svg parse error");
+        }
+    }
+
+    // should specify the type {@param Color}
+    function flattenToHex(color) {
+        const clr = color.rgb();
+        const clrRgb = {red: clr.color[0], green: clr.color[1], blue: clr.color[2], alpha: clr.valpha};
+        return new Color(blendAlpha(clrRgb), "rgb").hex();
+    }
+
+    function onSuggestedColorClicked(e, color) {
+        const el = document.createElement('textarea');
+        el.value = flattenToHex(new Color(color));
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        showToast(color + " copied");
+    }
+
+    function showToast(message) {
+        setToast({show: true, message: message});
+    }
+
+    function closeToast(e) {
+        setToast({show: false, message: ""});
+    }
+
+    function onAbsoluteColorFormFieldChanged(element, field, value) {
         if (field === 'name') {
             setAbsoluteColorName(element.target.value);
         } else if (field === 'color') {
             setAbsoluteHexColorValue(element.target.value);
+        } else if (field === 'absMimicColor') {
+            setAbsoluteMimicColor(value);
         }
     }
 
-    function onRelativeColorBaseSelected(e, which) {
-        console.log(which);
-        setRelativeBaseColor(which)
+    function arrayToLab(arr) {
+        return new lab(arr[0], arr[1], arr[2]);
     }
 
-    function onRelativeFormValueChanged(e, which) {
+    function computeColorSimilarity() {
+        if (relativeMimicColor && relativeBaseColor) {
+            const mimicColorAsLab = new Color(flattenToHex(new Color(relativeMimicColor))).lab().array();
+
+            const similarityMap = [];
+            for (let i = -100; i <= 100; i++) {
+                const baseColorHex = new Color(colorVariables.find(e => e.name === relativeBaseColor).mimicked).hex();
+                const relativeColorLab = new Color(enhanceHexBy(baseColorHex, i)).lab().array();
+                const mLab = arrayToLab(mimicColorAsLab);
+                const rLab = arrayToLab(relativeColorLab)
+                const diff = DeltaE.getDeltaE00(mLab, rLab);
+                similarityMap.push({intensity: i, diff: diff});
+            }
+            setSuggestedIntensity(similarityMap.sort((a, b) => a.diff - b.diff)[0].intensity);
+        }
+    }
+
+    function onRelativeFormValueChanged(e, which, value) {
+        // console.log("relativeFormChanged(" + which + ", " + value + ")");
         if (which === 'intensity') {
-            console.log(e.target.value);
-            setRelativeIntensity(e.target.value);
+            setRelativeIntensity(value);
         } else if (which === 'name') {
             setRelativeColorName(e.target.value);
+        } else if (which === 'baseColor') {
+            setRelativeBaseColor(value)
+        } else if (which === "mimicColor") {
+            setRelativeMimicColor(value);
         }
+
+        setRelativeFormState(!relativeFormState);
+    }
+
+    function isRelativeFormValid() {
+        const error = {};
+
+        if (!relativeColorName.isValidVar()) {
+            error.nameError = true;
+        }
+
+        if (relativeBaseColor.length === 0) {
+            error.colorError = true;
+        }
+
+        if (relativeMimicColor.length === 0) {
+            error.mimicError = true;
+        }
+
+        const intensityAsNumber = parseInt(relativeIntensity, 10);
+        if (isNaN(intensityAsNumber) || intensityAsNumber < -100 || intensityAsNumber > 100) {
+            error.intensityError = true;
+        }
+
+        // console.log(error);
+        return error;
     }
 
     function onRelativeDialogButtonClicked(e, field) {
         if (field === 'enter') {
-            // validate fields
-            let hasError = false;
-            let error = {};
 
-            if (!relativeColorName.isValidVar()) {
-                hasError = error;
-                error.nameError = true;
-            }
-
-            if (relativeBaseColor.length === 0) {
-                hasError = true;
-                error.colorError = true;
-            }
-
-            const intensityAsNumber = parseInt(relativeIntensity, 10);
-            if (isNaN(intensityAsNumber) || intensityAsNumber < -100 || intensityAsNumber > 100) {
-                hasError = true;
-                error.intensityError = true;
-            }
-
-            console.log(hasError);
-            if (hasError) {
+            let error = isRelativeFormValid();
+            console.log(error);
+            if (Object.keys(error).length !== 0) {
                 setRelativeFormError(error);
             } else {
                 error = null;
                 setRelativeFormError(null);
-                relativeVariables.push(new RelativeVariable(relativeColorName, relativeBaseColor, intensityAsNumber));
+                const baseColorHex = colorVariables.find(e => e.name === relativeBaseColor).value;
+                const intensityAsNumber = parseInt(relativeIntensity, 10);
+                const enhanced = new Color(enhanceHexBy(baseColorHex, intensityAsNumber)).hex();
+                relativeVariables.push(new RelativeVariable(relativeColorName.trimEnd(), relativeBaseColor, intensityAsNumber, enhanced, relativeMimicColor));
                 setRelativeVariables(relativeVariables);
-                setOpenRelativeColorForm(false);
-                setRelativeBaseColor("");
-                setRelativeIntensity("");
-                setRelativeColorName("");
+                clearRelativeFormError();
             }
 
         } else if (field === 'cancel') {
-            setOpenRelativeColorForm(false);
-            setRelativeBaseColor("");
-            setRelativeIntensity("");
+            clearRelativeFormError();
         }
+    }
+
+    function clearRelativeFormError() {
+        setOpenRelativeColorForm(false);
+        setRelativeBaseColor("");
+        setRelativeColorName("");
+        setRelativeIntensity(null);
+        setSuggestedIntensity(null);
+        setRelativeMimicColor("");
     }
 
     function onAbsoluteColorDialogButtonClicked(e, name) {
@@ -144,63 +325,61 @@ export default function Control(props) {
                 error.nameError = true;
             }
 
-            if (hasError) {
-                console.log(error);
-            } else {
-                colorVariables.push(new ColorVariable(absoluteColorName, absoluteHexColorValue));
-                setColorVariables(colorVariables);
-                setOpenAbsoluteColorForm(false);
-                error = null;
-                setAbsoluteColorName("")
-                setAbsoluteHexColorValue("")
+            if (!absoluteMimicColor) {
+                hasError = true;
+                error.mimicError = true;
             }
-            setAbsoluteColorError(error)
 
-            /**
-             * TODO check if color is a valid hex color.
-             * if true,
-             *      add to list, ✅
-             *      then close dialog, ✅
-             *      then create url svg variable and run a replace operation
-             *      then render templated svg
-             *      then render templated code
-             * else
-             *      show error
-             */
+            if (!hasError) {
+                colorVariables.push(new ColorVariable(absoluteColorName.trimEnd(), absoluteHexColorValue, absoluteMimicColor));
+                setColorVariables(colorVariables);
+                clearAbsoluteForm()
+            }
+            setAbsoluteFormError(error)
 
         } else if (name === 'cancel') {
-            setOpenAbsoluteColorForm(false);
-            setAbsoluteColorName("");
-            setAbsoluteHexColorValue("");
+            clearAbsoluteForm()
         }
     }
 
+    function clearAbsoluteForm() {
+        setOpenAbsoluteColorForm(false);
+        setAbsoluteColorName("");
+        setAbsoluteHexColorValue("");
+        setAbsoluteFormError(null);
+        setAbsoluteMimicColor("");
+    }
+
     function onDeleteRelativeVarClicked(e, name) {
-        let newVars = relativeVariables.filter(function(item) {
+        let newVars = relativeVariables.filter(function (item) {
             return item.name !== name
         })
         setRelativeVariables(newVars);
     }
 
     function onDeleteAbsoluteVarClicked(e, name) {
-        let newVars = colorVariables.filter(function(item) {
+        let newVars = colorVariables.filter(function (item) {
             return item.name !== name
         })
-        let relVars = relativeVariables.filter(function(item) {
+        let relVars = relativeVariables.filter(function (item) {
             return item.base !== name
         })
         setRelativeVariables(relVars);
         setColorVariables(newVars);
     }
 
-    function empty() {}
+    function empty() {
+    }
 
     return (
         <div>
+            <Typography hidden={colorVariables.length === 0} style={{"marginTop": "10px"}}>Absolute colors</Typography>
             <ColorVariableList variables={colorVariables}
                                onDeleteItemClicked={onDeleteAbsoluteVarClicked}
             />
             <Divider hidden={relativeVariables.length === 0}/>
+            <Typography hidden={relativeVariables.length === 0} style={{"marginTop": "10px"}}>Relative
+                colors</Typography>
             <RelativeColorVariableList relativeVariables={relativeVariables}
                                        baseColors={colorVariables}
                                        onDeleteItemClicked={onDeleteRelativeVarClicked}
@@ -228,24 +407,45 @@ export default function Control(props) {
             </Menu>
 
             <Divider style={{"margin-bottom": "20px"}}/>
-            <CodeSnippet/>
+            Detected colors
+            <DetectedColorList colors={suggestedColors}
+                               onCopyClicked={onSuggestedColorClicked}
+            />
+            <Divider style={{"margin-bottom": "20px"}}/>
+            <CodeSnippet style={{"margin-bottom": "20px"}}
+                         valid={originSvgValid}
+                         code={originalCode}
+                         enabled={true}
+                         onSvgTextChanged={onOriginalSvgTextChanged}/>
+
+            {/* not part of the main ui e.g dialogs and toasts */}
+            <Snackbar
+                open={toast.show}
+                onClose={closeToast}
+                message={toast.message}
+                autoHideDuration={900}
+            />
             <AbsoluteColorForm openForm={openAbsoluteColorForm}
-                               colorError={absoluteColorError}
+                               formError={absoluteFormError}
                                colorName={absoluteColorName}
-                               onFormValueChanged={onAbsoluteColorFormFieldChanged}
                                colorValue={absoluteHexColorValue}
+                               colorsToMimic={suggestedColors}
+                               selectedMimicColor={absoluteMimicColor}
+                               onFormValueChanged={onAbsoluteColorFormFieldChanged}
                                onDialogButtonClicked={onAbsoluteColorDialogButtonClicked}
             />
             <RelativeColorForm openForm={openRelativeColorForm}
                                formError={relativeFormError}
                                baseColor={relativeBaseColor}
                                colorVariables={colorVariables}
+                               colorsToMimic={suggestedColors}
                                colorName={relativeColorName}
-                               onColorBaseSelected={onRelativeColorBaseSelected}
                                intensity={relativeIntensity}
+                               suggestedIntensity={suggestedIntensity}
+                               selectedMimicColor={relativeMimicColor}
                                onDialogButtonClicked={onRelativeDialogButtonClicked}
                                onFormValueChanged={onRelativeFormValueChanged}
-                />
+            />
         </div>
     )
 }

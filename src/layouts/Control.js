@@ -40,6 +40,7 @@ export default function Control(props) {
     const [relativeFormState, setRelativeFormState] = useState(true);
     const [originalCode, setOriginalCode] = useState("");
     const [absoluteMimicColor, setAbsoluteMimicColor] = useState("");
+    const [templateSvgCode, setTemplateSvgCode] = useState("");
     let colorsCount = colorVariables.length + relativeVariables.length;
 
     useEffect(() => {
@@ -88,6 +89,7 @@ export default function Control(props) {
                     return value;
                 }
             }
+
             props.onModifiedSvgCode(generateTemplateSvgCode(swapModifiedColorsFunc));
 
             const swapTemplatedColorsFunc = function swapColors(value) {
@@ -101,7 +103,9 @@ export default function Control(props) {
                     return value;
                 }
             }
-            props.onTemplatedSvgCode(generateTemplateSvgCode(swapTemplatedColorsFunc));
+            const templateSvgCode = generateTemplateSvgCode(swapTemplatedColorsFunc);
+            setTemplateSvgCode(templateSvgCode);
+            props.onTemplatedSvgCode(templateSvgCode);
         } else {
             // clear modified ?
         }
@@ -125,6 +129,35 @@ export default function Control(props) {
 
     function onAddColorClicked(e) {
         setAnchorElement(e.target);
+    }
+
+    const onGenerateAndCopyJsonClicked = () => {
+        /**
+         *    name - random string
+         *    absolute - List
+         *      - name, default
+         *    relative - List
+         *      - name, base, intensity
+         *    svgCode
+         */
+        const generated = {};
+        generated.name = Math.random().toString(36).substring(7);
+        generated.abs = _.map(colorVariables, (c) => {
+            return {
+                "name": c.name,
+                "default": c.value
+            }
+        })
+        generated.rel = _.map(relativeVariables, (c) => {
+            return {
+                "name": c.name,
+                "base": c.base,
+                "intensity": c.intensity
+            }
+        })
+        generated.code = templateSvgCode;
+        copyToClipboard(JSON.stringify(generated));
+        showToast("svg template copied");
     }
 
     function onColorMenuItemClicked(element, type) {
@@ -185,13 +218,17 @@ export default function Control(props) {
         return new Color(blendAlpha(clrRgb), "rgb").hex();
     }
 
-    function onSuggestedColorClicked(e, color) {
+    function copyToClipboard(message) {
         const el = document.createElement('textarea');
-        el.value = flattenToHex(new Color(color));
+        el.value = message;
         document.body.appendChild(el);
         el.select();
         document.execCommand('copy');
         document.body.removeChild(el);
+    }
+
+    function onSuggestedColorClicked(e, color) {
+        copyToClipboard(flattenToHex(new Color(color)));
         showToast(color + " copied");
     }
 
@@ -390,6 +427,14 @@ export default function Control(props) {
                     style={{"margin-bottom": "20px", "margin-right": "10px", "textTransform": "none"}}
             >
                 add color
+            </Button>
+
+            <Button variant="contained"
+                    color="primary"
+                    onClick={onGenerateAndCopyJsonClicked}
+                    style={{"margin-bottom": "20px", "margin-right": "10px", "textTransform": "none"}}
+            >
+                generate and copy json
             </Button>
 
             <Menu

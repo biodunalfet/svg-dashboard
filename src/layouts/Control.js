@@ -7,7 +7,7 @@ import AbsoluteColorForm from "./AbsoluteColorForm";
 import RelativeColorForm from "./RelativeColorForm";
 import RelativeVariable from "../domain/RelativeVariable";
 import RelativeColorVariableList from "./RelativeColorVariableList";
-import {parse} from 'svg-parser';
+import { parseSync, stringify } from 'svgson'
 import jp from 'jsonpath'
 import validateColor from "validate-color";
 import Color from 'color'
@@ -16,7 +16,6 @@ import DetectedColorList from "./DetectedColorList";
 import DeltaE from 'delta-e';
 import lab from "../domain/lab";
 import _ from 'lodash';
-import hastUtilToHtml from 'hast-util-to-html';
 
 export default function Control(props) {
 
@@ -59,7 +58,8 @@ export default function Control(props) {
     };
 
     function generateTemplateSvgCode(swapColors) {
-        const parsed = parse(originalCode);
+
+        const parsed = parseSync(originalCode);
 
         let nodes = jp.apply(parsed, '$..fill', swapColors);
         nodes.concat(jp.apply(parsed, '$..stroke', swapColors));
@@ -67,12 +67,7 @@ export default function Control(props) {
         nodes.concat(jp.apply(parsed, '$..["flood-color"]', swapColors));
         nodes.concat(jp.apply(parsed, '$..["lighting-color"]', swapColors));
 
-        const fillResult = changeValuesByPath(parsed, nodes, 'fill');
-        const strokeResult = changeValuesByPath(fillResult, nodes, 'stroke');
-        const stopColorResult = changeValuesByPath(strokeResult, nodes, 'stop-color');
-        const floodColorResult = changeValuesByPath(stopColorResult, nodes, 'flood-color');
-        const lightingColorResult = changeValuesByPath(floodColorResult, nodes, 'lighting-color');
-        return hastUtilToHtml(lightingColorResult);
+        return stringify(parsed);
     }
 
     function generateTemplateAndModifiedSvg() {
@@ -81,6 +76,9 @@ export default function Control(props) {
             const swapModifiedColorsFunc = function swapColors(value) {
                 const colorVar = _.find(colorVariables, (c) => c.mimicked === value);
                 const relVar = _.find(relativeVariables, (c) => c.mimicked === value);
+                
+                console.log("value");
+                console.log(value);
                 if (colorVar) {
                     return colorVar.value;
                 } else if (relVar) {
@@ -110,22 +108,6 @@ export default function Control(props) {
             // clear modified ?
         }
     }
-
-    function changeValueByPath(object, path, value) {
-        if (Array.isArray(path) && path[0] === '$') {
-            const pathWithoutFirstElement = path.slice(1);
-            _.set(object, pathWithoutFirstElement, value);
-        }
-    }
-
-    function changeValuesByPath(object, nodes, lastPropertyName) {
-        nodes.forEach((node) => {
-            changeValueByPath(object, node.path.concat(lastPropertyName), node.value);
-        })
-
-        return object;
-    }
-
 
     function onAddColorClicked(e) {
         setAnchorElement(e.target);
@@ -182,7 +164,7 @@ export default function Control(props) {
         }
 
         try {
-            const parsed = parse(text);
+            const parsed = parseSync(text);
             setOriginSvgValid(true)
             props.onOriginSvg(text);
 
